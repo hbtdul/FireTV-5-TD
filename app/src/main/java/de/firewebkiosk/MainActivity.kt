@@ -71,8 +71,7 @@ class MainActivity : AppCompatActivity() {
         if (
             keyCode == KeyEvent.KEYCODE_MENU ||
             keyCode == KeyEvent.KEYCODE_SETTINGS ||
-            keyCode == KeyEvent.KEYCODE_MEDIA_TOP_MENU ||
-            keyCode == KeyEvent.KEYCODE_MEDIA_CONTEXT_MENU
+            keyCode == KeyEvent.KEYCODE_MEDIA_TOP_MENU
         ) {
             showSettingsDialog()
             return true
