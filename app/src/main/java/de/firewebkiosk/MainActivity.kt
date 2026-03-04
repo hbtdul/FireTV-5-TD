@@ -25,21 +25,21 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PREF_URL = "url"
-        private const val PREF_ROT = "rotation"
+        private const val PREF_ROT = "rotation_deg"
         private const val DEFAULT_URL = "https://google.com"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Screen an lassen
+        // Display anlassen
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContentView(R.layout.activity_main)
         root = findViewById(R.id.root)
         webView = findViewById(R.id.webView)
 
-        // WebView
+        // WebView Setup
         val s = webView.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
         val url = prefs.getString(PREF_URL, DEFAULT_URL) ?: DEFAULT_URL
         val rot = prefs.getInt(PREF_ROT, 0)
 
+        // Rotation anwenden + URL laden
         applyRotation(rot)
         webView.loadUrl(normalizeUrl(url))
     }
@@ -66,7 +67,9 @@ class MainActivity : AppCompatActivity() {
         return "https://$t"
     }
 
-    // Menü/Options Taste öffnet Settings
+    // FireTV Remote:
+    // - MENU / SETTINGS / TOP_MENU => Settings Dialog
+    // - BACK => WebView zurück
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (
             keyCode == KeyEvent.KEYCODE_MENU ||
@@ -77,7 +80,6 @@ class MainActivity : AppCompatActivity() {
             return true
         }
 
-        // Back: im WebView zurück
         if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
             webView.goBack()
             return true
@@ -141,29 +143,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Dreht den kompletten Inhalt (Root-View) und sorgt dafür,
-     * dass bei 90°/-90° die Breite/Höhe getauscht wird -> Vollbild statt “hochkant simuliert”.
+     * Rotation + Vollbild-Füllung (Cover).
+     *
+     * Wichtig: Wir drehen nur die WebView (nicht den Root),
+     * damit Dialoge normal bleiben.
+     *
+     * - Bei 90/-90 werden die Maße getauscht
+     * - Dann skalieren wir mit "cover" (maxOf), damit der Screen immer voll ist
+     * - Danach zentrieren wir per translationX/Y
      */
     private fun applyRotation(deg: Int) {
-        root.post {
-            val dm = resources.displayMetrics
-            val screenW = dm.widthPixels
-            val screenH = dm.heightPixels
+        webView.post {
+            val rootW = root.width
+            val rootH = root.height
+            if (rootW == 0 || rootH == 0) return@post
 
-            val lp = root.layoutParams
+            val contentW = if (deg == 90 || deg == -90) rootH else rootW
+            val contentH = if (deg == 90 || deg == -90) rootW else rootH
 
-            if (deg == 90 || deg == -90) {
-                lp.width = screenH
-                lp.height = screenW
-            } else {
-                lp.width = screenW
-                lp.height = screenH
-            }
+            // Größe setzen
+            val lp = webView.layoutParams as FrameLayout.LayoutParams
+            lp.width = contentW
+            lp.height = contentH
+            webView.layoutParams = lp
 
-            root.layoutParams = lp
-            root.pivotX = lp.width / 2f
-            root.pivotY = lp.height / 2f
-            root.rotation = deg.toFloat()
+            // Pivot Mitte
+            webView.pivotX = contentW / 2f
+            webView.pivotY = contentH / 2f
+
+            // Rotation
+            webView.rotation = deg.toFloat()
+
+            // Cover-Scale (füllt immer komplett)
+            val scale = maxOf(
+                rootW.toFloat() / contentW.toFloat(),
+                rootH.toFloat() / contentH.toFloat()
+            )
+            webView.scaleX = scale
+            webView.scaleY = scale
+
+            // Zentrieren
+            webView.translationX = (rootW - contentW * scale) / 2f
+            webView.translationY = (rootH - contentH * scale) / 2f
         }
     }
 }
