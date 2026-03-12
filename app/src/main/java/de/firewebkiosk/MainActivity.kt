@@ -1,10 +1,15 @@
+// app/src/main/java/de/firewebkiosk/MainActivity.kt
 package de.firewebkiosk
 
 import android.app.AlertDialog
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.view.KeyEvent
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -13,6 +18,8 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
@@ -32,14 +39,69 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Display anlassen
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         setContentView(R.layout.activity_main)
+
         root = findViewById(R.id.root)
         webView = findViewById(R.id.webView)
 
-        // WebView Setup
+        setupWebView()
+
+        val url = prefs.getString(PREF_URL, DEFAULT_URL) ?: DEFAULT_URL
+        val rot = prefs.getInt(PREF_ROT, 0)
+
+        applyRotation(rot)
+        webView.loadUrl(normalizeUrl(url))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        enterImmersiveFullscreen()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enterImmersiveFullscreen()
+    }
+
+    /**
+     * Captures FireTV "Options/Menu" more reliably than only onKeyDown().
+     * Also adds a fallback: long-press DPAD_CENTER to open settings on remotes
+     * where MENU is intercepted by the system.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (isSettingsKey(event.keyCode)) {
+                showSettingsDialog()
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+            showSettingsDialog()
+            return true
+        }
+        return super.onKeyLongPress(keyCode, event)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
+            webView.goBack()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private fun isSettingsKey(keyCode: Int): Boolean {
+        return keyCode == KeyEvent.KEYCODE_MENU ||
+            keyCode == KeyEvent.KEYCODE_SETTINGS ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_TOP_MENU
+    }
+
+    private fun setupWebView() {
         val s = webView.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
@@ -52,40 +114,15 @@ class MainActivity : AppCompatActivity() {
         webView.webChromeClient = WebChromeClient()
         webView.webViewClient = WebViewClient()
 
-        // gespeicherte Werte
-        val url = prefs.getString(PREF_URL, DEFAULT_URL) ?: DEFAULT_URL
-        val rot = prefs.getInt(PREF_ROT, 0)
-
-        // Rotation anwenden + URL laden
-        applyRotation(rot)
-        webView.loadUrl(normalizeUrl(url))
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        webView.requestFocus(View.FOCUS_DOWN)
     }
 
     private fun normalizeUrl(input: String): String {
         val t = input.trim()
         if (t.startsWith("http://") || t.startsWith("https://")) return t
         return "https://$t"
-    }
-
-    // FireTV Remote:
-    // - MENU / SETTINGS / TOP_MENU => Settings Dialog
-    // - BACK => WebView zurück
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (
-            keyCode == KeyEvent.KEYCODE_MENU ||
-            keyCode == KeyEvent.KEYCODE_SETTINGS ||
-            keyCode == KeyEvent.KEYCODE_MEDIA_TOP_MENU
-        ) {
-            showSettingsDialog()
-            return true
-        }
-
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack()
-            return true
-        }
-
-        return super.onKeyDown(keyCode, event)
     }
 
     private fun showSettingsDialog() {
@@ -96,38 +133,47 @@ class MainActivity : AppCompatActivity() {
             hint = "https://dein-link.de"
         }
 
-        val rotLabels = arrayOf("0°", "90°", "180°", "-90°")
         val rotValues = intArrayOf(0, 90, 180, -90)
-        val current = prefs.getInt(PREF_ROT, 0)
-        val checkedIndex = rotValues.indexOf(current).let { if (it >= 0) it else 0 }
+        val rotLabels = arrayOf("0°", "90°", "180°", "-90°")
+        val currentRot = prefs.getInt(PREF_ROT, 0)
+        val checkedIndex = rotValues.indexOf(currentRot).let { if (it >= 0) it else 0 }
+
+        val radioGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            rotLabels.forEachIndexed { idx, label ->
+                addView(
+                    RadioButton(this@MainActivity).apply {
+                        id = View.generateViewId()
+                        text = label
+                        isChecked = idx == checkedIndex
+                    }
+                )
+            }
+        }
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 0)
+            setPadding(48, 32, 48, 0)
 
-            addView(TextView(this@MainActivity).apply {
-                text = "URL"
-                textSize = 16f
-            })
+            addView(TextView(this@MainActivity).apply { text = "URL" })
             addView(urlInput)
 
             addView(TextView(this@MainActivity).apply {
                 text = "\nMonitor-Rotation"
-                textSize = 16f
             })
+            addView(radioGroup)
         }
 
         AlertDialog.Builder(this)
             .setTitle("Kiosk Einstellungen")
             .setView(container)
-            .setSingleChoiceItems(rotLabels, checkedIndex, null)
-            .setPositiveButton("Speichern") { dialog, _ ->
+            .setPositiveButton("Speichern") { _, _ ->
                 val urlRaw = urlInput.text?.toString().orEmpty().trim()
+                val pickedIndex = (0 until radioGroup.childCount).firstOrNull { i ->
+                    (radioGroup.getChildAt(i) as? RadioButton)?.isChecked == true
+                } ?: checkedIndex
 
-                val listView = (dialog as AlertDialog).listView
-                val picked = listView.checkedItemPosition.takeIf { it >= 0 } ?: checkedIndex
-                val rot = rotValues[picked]
-
+                val rot = rotValues[pickedIndex]
                 val url = normalizeUrl(if (urlRaw.isBlank()) DEFAULT_URL else urlRaw)
 
                 prefs.edit()
@@ -137,6 +183,7 @@ class MainActivity : AppCompatActivity() {
 
                 applyRotation(rot)
                 webView.loadUrl(url)
+                enterImmersiveFullscreen()
             }
             .setNegativeButton("Abbrechen", null)
             .show()
@@ -145,9 +192,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Rotation + Vollbild-Füllung (Cover).
      *
-     * Wichtig: Wir drehen nur die WebView (nicht den Root),
-     * damit Dialoge normal bleiben.
-     *
+     * Wir drehen nur die WebView (nicht den Root), damit Dialoge normal bleiben.
      * - Bei 90/-90 werden die Maße getauscht
      * - Dann skalieren wir mit "cover" (maxOf), damit der Screen immer voll ist
      * - Danach zentrieren wir per translationX/Y
@@ -161,30 +206,45 @@ class MainActivity : AppCompatActivity() {
             val contentW = if (deg == 90 || deg == -90) rootH else rootW
             val contentH = if (deg == 90 || deg == -90) rootW else rootH
 
-            // Größe setzen
             val lp = webView.layoutParams as FrameLayout.LayoutParams
             lp.width = contentW
             lp.height = contentH
             webView.layoutParams = lp
 
-            // Pivot Mitte
             webView.pivotX = contentW / 2f
             webView.pivotY = contentH / 2f
-
-            // Rotation
             webView.rotation = deg.toFloat()
 
-            // Cover-Scale (füllt immer komplett)
             val scale = maxOf(
                 rootW.toFloat() / contentW.toFloat(),
                 rootH.toFloat() / contentH.toFloat()
             )
+
             webView.scaleX = scale
             webView.scaleY = scale
 
-            // Zentrieren
             webView.translationX = (rootW - contentW * scale) / 2f
             webView.translationY = (rootH - contentH * scale) / 2f
+        }
+    }
+
+    private fun enterImmersiveFullscreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         }
     }
 }
