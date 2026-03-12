@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.text.InputFilter
 import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
@@ -22,6 +23,8 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,7 +36,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREF_URL = "url"
         private const val PREF_ROT = "rotation_deg"
+        private const val PREF_ZOOM = "zoom_percent"
+
         private const val DEFAULT_URL = "https://google.com"
+        private const val DEFAULT_ZOOM = 100
+        private const val MIN_ZOOM = 50
+        private const val MAX_ZOOM = 300
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,8 +57,9 @@ class MainActivity : AppCompatActivity() {
 
         val url = prefs.getString(PREF_URL, DEFAULT_URL) ?: DEFAULT_URL
         val rot = prefs.getInt(PREF_ROT, 0)
+        val zoom = prefs.getInt(PREF_ZOOM, DEFAULT_ZOOM)
 
-        applyRotation(rot)
+        applyTransform(rot, zoom)
         webView.loadUrl(normalizeUrl(url))
     }
 
@@ -64,11 +73,6 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus) enterImmersiveFullscreen()
     }
 
-    /**
-     * Captures FireTV "Options/Menu" more reliably than only onKeyDown().
-     * Also adds a fallback: long-press DPAD_CENTER to open settings on remotes
-     * where MENU is intercepted by the system.
-     */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
             if (isSettingsKey(event.keyCode)) {
@@ -110,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         s.loadWithOverviewMode = true
         s.mediaPlaybackRequiresUserGesture = false
         s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        s.setSupportZoom(false)
 
         webView.webChromeClient = WebChromeClient()
         webView.webViewClient = WebViewClient()
@@ -133,8 +138,16 @@ class MainActivity : AppCompatActivity() {
             hint = "https://dein-link.de"
         }
 
+        val zoomInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            filters = arrayOf(InputFilter.LengthFilter(3))
+            setText(prefs.getInt(PREF_ZOOM, DEFAULT_ZOOM).toString())
+            setSelection(text.length)
+            hint = "z.B. 120"
+        }
+
         val rotValues = intArrayOf(0, 90, 180, -90)
-        val rotLabels = arrayOf("0°", "90°", "180°", "-90°")
+        val rotLabels = arrayOf("0° (Horizontal)", "90° (Hochkant)", "180° (Horizontal)", "-90° (Hochkant)")
         val currentRot = prefs.getInt(PREF_ROT, 0)
         val checkedIndex = rotValues.indexOf(currentRot).let { if (it >= 0) it else 0 }
 
@@ -158,10 +171,15 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(this@MainActivity).apply { text = "URL" })
             addView(urlInput)
 
-            addView(TextView(this@MainActivity).apply {
-                text = "\nMonitor-Rotation"
-            })
+            addView(TextView(this@MainActivity).apply { text = "\nRotation" })
             addView(radioGroup)
+
+            addView(TextView(this@MainActivity).apply { text = "\nZoom (%)  (50–300)" })
+            addView(zoomInput)
+
+            addView(TextView(this@MainActivity).apply {
+                text = "\nTipp: Wenn MENU nicht geht → Long-Press OK öffnet dieses Menü."
+            })
         }
 
         AlertDialog.Builder(this)
@@ -176,61 +194,64 @@ class MainActivity : AppCompatActivity() {
                 val rot = rotValues[pickedIndex]
                 val url = normalizeUrl(if (urlRaw.isBlank()) DEFAULT_URL else urlRaw)
 
+                val zoomParsed = zoomInput.text?.toString()?.trim()?.toIntOrNull() ?: DEFAULT_ZOOM
+                val zoom = clampZoom(zoomParsed)
+
                 prefs.edit()
                     .putString(PREF_URL, url)
                     .putInt(PREF_ROT, rot)
+                    .putInt(PREF_ZOOM, zoom)
                     .apply()
 
-                applyRotation(rot)
+                applyTransform(rot, zoom)
                 webView.loadUrl(url)
                 enterImmersiveFullscreen()
+                webView.requestFocus(View.FOCUS_DOWN)
             }
-            .setNegativeButton("Abbrechen", null)
+            .setNegativeButton("Abbrechen") { _, _ ->
+                webView.requestFocus(View.FOCUS_DOWN)
+            }
             .show()
     }
 
+    private fun clampZoom(value: Int): Int = max(MIN_ZOOM, min(MAX_ZOOM, value))
+
     /**
-     * Rotation + Vollbild-Füllung (Cover).
-     *
-     * Wir drehen nur die WebView (nicht den Root), damit Dialoge normal bleiben.
-     * - Bei 90/-90 werden die Maße getauscht
-     * - Dann skalieren wir mit "cover" (maxOf), damit der Screen immer voll ist
-     * - Danach zentrieren wir per translationX/Y
+     * Always FULLSCREEN (COVER) in landscape + portrait.
+     * Adds user zoom (%) on top of cover-scale.
      */
-    private fun applyRotation(deg: Int) {
-    webView.post {
-        val parentW = root.width
-        val parentH = root.height
-        if (parentW == 0 || parentH == 0) return@post
+    private fun applyTransform(rotationDeg: Int, zoomPercent: Int) {
+        webView.post {
+            val parentW = root.width
+            val parentH = root.height
+            if (parentW == 0 || parentH == 0) return@post
 
-        // Always fill parent BEFORE rotation
-        val lp = webView.layoutParams as FrameLayout.LayoutParams
-        lp.width = FrameLayout.LayoutParams.MATCH_PARENT
-        lp.height = FrameLayout.LayoutParams.MATCH_PARENT
-        webView.layoutParams = lp
+            val lp = webView.layoutParams as FrameLayout.LayoutParams
+            lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+            lp.height = FrameLayout.LayoutParams.MATCH_PARENT
+            webView.layoutParams = lp
 
-        val w = parentW.toFloat()
-        val h = parentH.toFloat()
+            val w = parentW.toFloat()
+            val h = parentH.toFloat()
 
-        webView.pivotX = w / 2f
-        webView.pivotY = h / 2f
-        webView.rotation = deg.toFloat()
+            webView.pivotX = w / 2f
+            webView.pivotY = h / 2f
+            webView.rotation = rotationDeg.toFloat()
 
-        // Bounding box after rotation (90/-90 swaps)
-        val rotatedW = if (deg == 90 || deg == -90) h else w
-        val rotatedH = if (deg == 90 || deg == -90) w else h
+            val rotatedW = if (rotationDeg == 90 || rotationDeg == -90) h else w
+            val rotatedH = if (rotationDeg == 90 || rotationDeg == -90) w else h
 
-        // COVER: always full screen (no bars), may crop a bit
-        val scale = maxOf(parentW / rotatedW, parentH / rotatedH)
+            val coverScale = max(parentW / rotatedW, parentH / rotatedH)
+            val userScale = clampZoom(zoomPercent) / 100f
+            val scale = coverScale * userScale
 
-        webView.scaleX = scale
-        webView.scaleY = scale
+            webView.scaleX = scale
+            webView.scaleY = scale
 
-        // Center the rotated+scaled bounding box inside parent
-        webView.translationX = (parentW - rotatedW * scale) / 2f
-        webView.translationY = (parentH - rotatedH * scale) / 2f
+            webView.translationX = (parentW - rotatedW * scale) / 2f
+            webView.translationY = (parentH - rotatedH * scale) / 2f
+        }
     }
-}
 
     private fun enterImmersiveFullscreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
