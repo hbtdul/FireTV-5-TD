@@ -198,35 +198,39 @@ class MainActivity : AppCompatActivity() {
      * - Danach zentrieren wir per translationX/Y
      */
     private fun applyRotation(deg: Int) {
-        webView.post {
-            val rootW = root.width
-            val rootH = root.height
-            if (rootW == 0 || rootH == 0) return@post
+    webView.post {
+        val parentW = root.width
+        val parentH = root.height
+        if (parentW == 0 || parentH == 0) return@post
 
-            val contentW = if (deg == 90 || deg == -90) rootH else rootW
-            val contentH = if (deg == 90 || deg == -90) rootW else rootH
+        // Always fill parent BEFORE rotation
+        val lp = webView.layoutParams as FrameLayout.LayoutParams
+        lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+        lp.height = FrameLayout.LayoutParams.MATCH_PARENT
+        webView.layoutParams = lp
 
-            val lp = webView.layoutParams as FrameLayout.LayoutParams
-            lp.width = contentW
-            lp.height = contentH
-            webView.layoutParams = lp
+        val w = parentW.toFloat()
+        val h = parentH.toFloat()
 
-            webView.pivotX = contentW / 2f
-            webView.pivotY = contentH / 2f
-            webView.rotation = deg.toFloat()
+        webView.pivotX = w / 2f
+        webView.pivotY = h / 2f
+        webView.rotation = deg.toFloat()
 
-            val scale = maxOf(
-                rootW.toFloat() / contentW.toFloat(),
-                rootH.toFloat() / contentH.toFloat()
-            )
+        // Bounding box after rotation (90/-90 swaps)
+        val rotatedW = if (deg == 90 || deg == -90) h else w
+        val rotatedH = if (deg == 90 || deg == -90) w else h
 
-            webView.scaleX = scale
-            webView.scaleY = scale
+        // COVER: always full screen (no bars), may crop a bit
+        val scale = maxOf(parentW / rotatedW, parentH / rotatedH)
 
-            webView.translationX = (rootW - contentW * scale) / 2f
-            webView.translationY = (rootH - contentH * scale) / 2f
-        }
+        webView.scaleX = scale
+        webView.scaleY = scale
+
+        // Center the rotated+scaled bounding box inside parent
+        webView.translationX = (parentW - rotatedW * scale) / 2f
+        webView.translationY = (parentH - rotatedH * scale) / 2f
     }
+}
 
     private fun enterImmersiveFullscreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
