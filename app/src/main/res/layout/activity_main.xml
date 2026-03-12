@@ -11,8 +11,8 @@
         android:id="@+id/webView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="@android:color/black"
         android:overScrollMode="never"
-        android:scrollbars="none"
-        android:background="@android:color/black" />
+        android:scrollbars="none" />
 
 </FrameLayout>
