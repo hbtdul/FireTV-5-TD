@@ -3,8 +3,10 @@ package de.firewebkiosk
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.text.InputFilter
 import android.text.InputType
 import android.view.KeyEvent
