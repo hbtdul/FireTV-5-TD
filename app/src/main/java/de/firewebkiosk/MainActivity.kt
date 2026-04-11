@@ -168,6 +168,9 @@ class MainActivity : AppCompatActivity() {
     /**
      * FULLSCREEN cover for rotation ONLY.
      * Important: no user zoom here, otherwise you zoom the "window" again.
+     * 
+     * For portrait mode (90/-90 deg), we swap dimensions and use FIT mode
+     * to ensure the entire webpage is visible on the screen.
      */
     private fun applyRotationCover(rotationDeg: Int) {
         webView.post {
@@ -187,8 +190,9 @@ class MainActivity : AppCompatActivity() {
             webView.pivotY = h / 2f
             webView.rotation = rotationDeg.toFloat()
 
-            val rotatedW = if (rotationDeg == 90 || rotationDeg == -90) h else w
-            val rotatedH = if (rotationDeg == 90 || rotationDeg == -90) w else h
+            val isPortrait = rotationDeg == 90 || rotationDeg == -90
+            val rotatedW = if (isPortrait) h else w
+            val rotatedH = if (isPortrait) w else h
 
             val coverScale = max(parentW / rotatedW, parentH / rotatedH)
 
@@ -196,6 +200,15 @@ class MainActivity : AppCompatActivity() {
             webView.scaleY = coverScale
             webView.translationX = (parentW - rotatedW * coverScale) / 2f
             webView.translationY = (parentH - rotatedH * coverScale) / 2f
+            
+            // For portrait mode, enable FIT_WIDTH mode to show full webpage
+            if (isPortrait) {
+                webView.settings.useWideViewPort = true
+                webView.settings.loadWithOverviewMode = true
+                // Adjust scale to fit the content width to the rotated screen width
+                val contentScale = (min(parentW, parentH) / max(parentW, parentH) * 100).toInt()
+                webView.setInitialScale(max(50, min(100, contentScale)))
+            }
         }
     }
 
